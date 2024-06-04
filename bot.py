@@ -111,7 +111,7 @@ async def status_task() -> None:
     """
     Setup the game status task of the bot
     """
-    statuses = ["Made by Togami#4746", "https://kernelcheats.cc", "https://kernelcheats.cc"]
+    statuses = ["Made by Togami#4746", "https://wohax.xyz/", "https://wohax.xyz/"]
     await bot.change_presence(activity=discord.Game(random.choice(statuses)))
 
 
