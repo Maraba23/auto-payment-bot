@@ -6,6 +6,7 @@ import qrcode
 
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
+from discord.ui import View, Select, Button
 from dotenv import load_dotenv
 import os
 
@@ -73,18 +74,17 @@ class Payments(commands.Cog, name="payments"):
         else:
             await ctx.send(f"❌ **Erro:** Produto com identificador {identifier} não encontrado.")
 
-    @commands.hybrid_command(
-        name="list-products",
-        description="Listar todos os produtos com estoque"
-    )
-    @commands.has_permissions(administrator=True)
-    async def list_products(self, ctx: Context) -> None:
-        c.execute("SELECT p.id, p.name, p.identifier, p.price, COUNT(s.id) as stock FROM products p LEFT JOIN stock s ON p.id = s.product_id GROUP BY p.id")
+    async def update_list_products(self, ctx: Context, page: int, interaction: discord.Interaction = None) -> None:
+        items_per_page = 10
+        offset = (page - 1) * items_per_page
+
+        c.execute("SELECT p.id, p.name, p.identifier, p.price, COUNT(s.id) as stock FROM products p LEFT JOIN stock s ON p.id = s.product_id GROUP BY p.id LIMIT ? OFFSET ?", (items_per_page, offset))
         products = c.fetchall()
+
         if not products:
             await ctx.send("🔍 **Nenhum produto encontrado.**")
             return
-        
+
         embed = discord.Embed(title="📋 Lista de Produtos", description="Clique no botão abaixo e selecione o produto que deseja comprar, o bot vai criar um checkout para você",  color=0x5865F2)
         options = []
         for product in products:
@@ -102,8 +102,76 @@ class Payments(commands.Cog, name="payments"):
 
         view = discord.ui.View()
         view.add_item(select)
+
+        c.execute("SELECT COUNT(*) FROM products")
+        total_products = c.fetchone()[0]
+        total_pages = (total_products + items_per_page - 1) // items_per_page
+
+        if page < total_pages:
+            next_button = Button(label="Próxima Página", style=discord.ButtonStyle.primary)
+            async def next_button_callback(interaction: discord.Interaction):
+                await self.update_list_products(ctx, page + 1, interaction)
+            next_button.callback = next_button_callback
+            view.add_item(next_button)
+
+        if page > 1:
+            prev_button = Button(label="Página Anterior", style=discord.ButtonStyle.secondary)
+            async def prev_button_callback(interaction: discord.Interaction):
+                await self.update_list_products(ctx, page - 1, interaction)
+            prev_button.callback = prev_button_callback
+            view.add_item(prev_button)
         
-        await ctx.send(embed=embed, view=view)
+        if interaction:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(
+        name="list-products",
+        description="Listar todos os produtos com estoque"
+    )
+    @commands.has_permissions(administrator=True)
+    async def list_products(self, ctx: Context) -> None:
+        await self.update_list_products(ctx, 1)
+
+    async def update_list_all_products(self, ctx: Context, page: int, interaction: discord.Interaction = None) -> None:
+        items_per_page = 10
+        offset = (page - 1) * items_per_page
+
+        c.execute("SELECT id, name, identifier FROM products LIMIT ? OFFSET ?", (items_per_page, offset))
+        products = c.fetchall()
+
+        if not products:
+            await ctx.send("🔍 **Nenhum produto encontrado.**")
+            return
+        
+        product_list = "\n".join([f"**ID:** {product[0]}, **Nome:** {product[1]}, **Identificador:** {product[2]}" for product in products])
+        embed = discord.Embed(title="📋 Lista de Todos os Produtos", description=product_list, color=0x5865F2)
+        
+        view = discord.ui.View()
+
+        c.execute("SELECT COUNT(*) FROM products")
+        total_products = c.fetchone()[0]
+        total_pages = (total_products + items_per_page - 1) // items_per_page
+
+        if page < total_pages:
+            next_button = Button(label="Próxima Página", style=discord.ButtonStyle.primary)
+            async def next_button_callback(interaction: discord.Interaction):
+                await self.update_list_all_products(ctx, page + 1, interaction)
+            next_button.callback = next_button_callback
+            view.add_item(next_button)
+
+        if page > 1:
+            prev_button = Button(label="Página Anterior", style=discord.ButtonStyle.secondary)
+            async def prev_button_callback(interaction: discord.Interaction):
+                await self.update_list_all_products(ctx, page - 1, interaction)
+            prev_button.callback = prev_button_callback
+            view.add_item(prev_button)
+
+        if interaction:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await ctx.send(embed=embed, view=view)
 
     @commands.hybrid_command(
         name="list-all-products",
@@ -111,14 +179,7 @@ class Payments(commands.Cog, name="payments"):
     )
     @commands.has_permissions(administrator=True)
     async def list_all_products(self, ctx: Context) -> None:
-        c.execute("SELECT id, name, identifier FROM products")
-        products = c.fetchall()
-        if not products:
-            await ctx.send("🔍 **Nenhum produto encontrado.**")
-            return
-        
-        product_list = "\n".join([f"**ID:** {product[0]}, **Nome:** {product[1]}, **Identificador:** {product[2]}" for product in products])
-        await ctx.send(f"📋 **Lista de Produtos:**\n{product_list}")
+        await self.update_list_all_products(ctx, 1)
 
     async def create_checkout_channel(self, guild, user, identifier):
         # Verificar estoque do produto
@@ -134,7 +195,7 @@ class Payments(commands.Cog, name="payments"):
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
         for role in guild.roles:
             if role.permissions.administrator:
@@ -224,9 +285,6 @@ class Payments(commands.Cog, name="payments"):
             print(f"Checking {len(pending_payments)} pending payments...")
             for payment_id, channel_id, product_id in pending_payments:
                 url = f"https://api.mercadopago.com/v1/payments/{payment_id}?access_token={mp_ACCESS_TOKEN}"
-                # headers = {
-                #     "Authorization": f"Bearer {mp_ACCESS_TOKEN}"
-                # }
                 print(f"Checking payment: {payment_id}")
                 response = requests.get(url)
                 print(response.json())
