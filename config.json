@@ -1,10 +1,10 @@
 {
   "prefix": "w!",
-  "token": "MTI0NzIwNzU0MDcxNTAyODQ4MQ.GrAYHN.ii1L8ayVn3Xwtrga1R4u4tQgDNzTCFngtbdJ9M",
+  "token": "Seu Token Aqui",
   "permissions": "8",
-  "application_id": "1247207540715028481",
+  "application_id": "Seu Aplication ID aqui",
   "sync_commands_globally": false,
   "owners": [
-    406488411470299136,
+    Os IDs dos discords que sao os owners,
   ]
 }
